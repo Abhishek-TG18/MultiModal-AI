@@ -191,3 +191,11 @@ deployment/model_normalized/*
 !deployment/model_normalized/.gitkeep
 
 *.tar.gz
+
+
+bert_model_uncased/vocab.txt
+bert_model_uncased/bert_model.ckpt.data-00000-of-00001  
+bert_model_uncased/*
+
+models/bert_model_uncased/*
+!models/bert_model_uncased/.gitkeep
