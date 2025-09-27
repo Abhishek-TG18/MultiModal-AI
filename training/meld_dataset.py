@@ -20,7 +20,7 @@ class MELDDataset(Dataset):
 
         # Refers to bert-base-uncased model in local system
         self.tokenizer = AutoTokenizer.from_pretrained(
-            r"C:\Users\v-abhishek.tg\OneDrive - Aurigo Software Technologies Inc\Desktop\MP\models\bert-base-uncased"
+            r"C:\MP\models\bert-base-uncased"
         )
 
         # Mapping emotions to integers
@@ -82,10 +82,57 @@ class MELDDataset(Dataset):
         # Convert to tensor and permute to (T, C, H, W)
         return torch.FloatTensor(np.array(frames)).permute(0, 3, 1, 2)
 
+    # def _extract_audio_features(self, video_path):
+    #     audio_path = video_path.replace('.mp4', '.wav')
+
+    #     try:
+    #         subprocess.run([
+    #             'ffmpeg',
+    #             '-i', video_path,
+    #             '-vn',
+    #             '-acodec', 'pcm_s16le',
+    #             '-ar', '16000',
+    #             '-ac', '1',
+    #             audio_path
+    #         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    #         waveform, sample_rate = torchaudio.load(audio_path)
+
+    #         if sample_rate != 16000:
+    #             resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+    #             waveform = resampler(waveform)
+
+    #         mel_spectrogram = torchaudio.transforms.MelSpectrogram(
+    #             sample_rate=16000,
+    #             n_mels=64,
+    #             n_fft=1024,
+    #             hop_length=512
+    #         )
+    #         mel_spec = mel_spectrogram(waveform)
+
+    #         # Normalize
+    #         mel_spec = (mel_spec - mel_spec.mean()) / (mel_spec.std())
+    #         if mel_spec.size(2) < 300:
+    #             pad_amount = 300 - mel_spec.size(2)
+    #             mel_spec = torch.nn.functional.pad(mel_spec, (0, pad_amount))
+    #         else:
+    #             mel_spec = mel_spec[:, :, :300]  # Truncate to 300 frames
+
+    #         return mel_spec  # Shape: (1, n_mels, time)
+
+    #     except subprocess.CalledProcessError as e:
+    #         raise RuntimeError(f"FFmpeg error: {str(e)}")
+    #     except Exception as e:
+    #         raise RuntimeError(f"Audio processing error: {str(e)}")
+    #     finally:
+    #         if os.path.exists(audio_path):
+    #             os.remove(audio_path)
+
     def _extract_audio_features(self, video_path):
         audio_path = video_path.replace('.mp4', '.wav')
 
         try:
+            # --- Step 1: Extract audio from video using ffmpeg ---
             subprocess.run([
                 'ffmpeg',
                 '-i', video_path,
@@ -96,12 +143,30 @@ class MELDDataset(Dataset):
                 audio_path
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            waveform, sample_rate = torchaudio.load(audio_path)
+            # --- Step 2: Load audio with torchaudio ---
+            waveform, sample_rate = None, None
+            try:
+                # Try with sox_io (default backend)
+                torchaudio.set_audio_backend("sox_io")
+                waveform, sample_rate = torchaudio.load(audio_path)
+            except Exception as e1:
+                try:
+                    # Fallback to soundfile if installed
+                    import soundfile as sf
+                    torchaudio.set_audio_backend("soundfile")
+                    waveform, sample_rate = torchaudio.load(audio_path)
+                except Exception as e2:
+                    raise RuntimeError(
+                        f"Audio loading failed with both sox_io and soundfile. "
+                        f"Sox_io error: {e1}, Soundfile error: {e2}"
+                    )
 
+            # --- Step 3: Resample if needed ---
             if sample_rate != 16000:
                 resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
                 waveform = resampler(waveform)
 
+            # --- Step 4: Mel-spectrogram extraction ---
             mel_spectrogram = torchaudio.transforms.MelSpectrogram(
                 sample_rate=16000,
                 n_mels=64,
@@ -110,23 +175,24 @@ class MELDDataset(Dataset):
             )
             mel_spec = mel_spectrogram(waveform)
 
-            # Normalize
-            mel_spec = (mel_spec - mel_spec.mean()) / (mel_spec.std())
+            # --- Step 5: Normalize and pad/truncate ---
+            mel_spec = (mel_spec - mel_spec.mean()) / (mel_spec.std() + 1e-9)
             if mel_spec.size(2) < 300:
                 pad_amount = 300 - mel_spec.size(2)
                 mel_spec = torch.nn.functional.pad(mel_spec, (0, pad_amount))
             else:
-                mel_spec = mel_spec[:, :, :300]  # Truncate to 300 frames
+                mel_spec = mel_spec[:, :, :300]
 
-            return mel_spec  # Shape: (1, n_mels, time)
+            return mel_spec  # Shape: (1, 64, 300)
 
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"FFmpeg error: {str(e)}")
+            raise RuntimeError(f"FFmpeg error while extracting audio: {str(e)}")
         except Exception as e:
             raise RuntimeError(f"Audio processing error: {str(e)}")
         finally:
             if os.path.exists(audio_path):
                 os.remove(audio_path)
+
 
     def __len__(self):
         return len(self.data)
@@ -143,9 +209,6 @@ class MELDDataset(Dataset):
 
             # Normalize slashes to avoid Windows path issues
             video_path = os.path.normpath(video_path)
-
-            # Debug print
-            # print(f"Checking video path: {video_path}, Exists? {os.path.exists(video_path)}")
 
             if not os.path.exists(video_path):
                 raise FileNotFoundError(f"Video file not found: {video_path}")
@@ -206,12 +269,12 @@ def prepare_dataloader(train_csv, train_video_dir,
 # Main execution
 if __name__ == "__main__":
     train_loader, dev_loader, test_loader = prepare_dataloader(
-        r'C:\Users\v-abhishek.tg\OneDrive - Aurigo Software Technologies Inc\Desktop\MP\dataset\train\train_sent_emo.csv',
-        r'C:\Users\v-abhishek.tg\OneDrive - Aurigo Software Technologies Inc\Desktop\MP\dataset\train\train_splits',
-        r'C:\Users\v-abhishek.tg\OneDrive - Aurigo Software Technologies Inc\Desktop\MP\dataset\dev\dev_sent_emo.csv',
-        r'C:\Users\v-abhishek.tg\OneDrive - Aurigo Software Technologies Inc\Desktop\MP\dataset\dev\dev_splits_complete',
-        r'C:\Users\v-abhishek.tg\OneDrive - Aurigo Software Technologies Inc\Desktop\MP\dataset\test\test_sent_emo.csv',
-        r'C:\Users\v-abhishek.tg\OneDrive - Aurigo Software Technologies Inc\Desktop\MP\dataset\test\output_repeated_splits_test'
+        r'C:\MP\dataset\train\train_sent_emo.csv',
+        r'C:\MP\dataset\train\train_splits',
+        r'C:\MP\dataset\dev\dev_sent_emo.csv',
+        r'C:\MP\dataset\dev\dev_splits_complete',
+        r'C:\MP\dataset\test\test_sent_emo.csv',
+        r'C:\MP\dataset\test\output_repeated_splits_test'
     )
 
     for batch in train_loader:

@@ -122,7 +122,7 @@ def main():
             {"Name": "test:loss" , "Value":test_loss["total"]},
             {"Name":"test:emotion_accuracy", "Value": test_metrics["emotion_accuracy"]} ,
             {"Name":"test:sentiment_accuracy", "Value": test_metrics["sentiment_accuracy"]} ,
-            {"Name":"test:sentiment_precision", "Value": test_metrics["sentiment_precison"]} ,
+            {"Name":"test:emotion_precision", "Value": test_metrics["emotion_precison"]} ,
             {"Name":"test:sentiment_precision", "Value": test_metrics["sentiment_precision"]} ,
         
         ]
